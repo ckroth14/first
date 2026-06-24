@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""Side-by-side comparison of two text files.
+"""Compare two plain .txt files by line content, ignoring order.
 
-Single-file, stdlib-only script. Works on Windows, macOS, and Linux
-(no platform-specific calls).
+Treats each file as a multiset of lines: reports which lines appear only
+in file1, only in file2, and in both, along with counts. Makes no
+assumptions about file format, structure, or domain (no columns, no
+headers, no special markers) — just raw line content.
+
+Single-file, stdlib-only script. Works on Windows, macOS, and Linux.
 
 Usage:
     python compare_files.py file1.txt file2.txt
-    python compare_files.py file1.txt file2.txt --width 40
 """
 import argparse
-import difflib
-import shutil
 import sys
+from collections import Counter
 
 
 def read_lines(path):
@@ -19,43 +21,12 @@ def read_lines(path):
         return f.read().splitlines()
 
 
-def fit(text, width):
-    if len(text) > width:
-        return text[: width - 1] + "…"
-    return text.ljust(width)
-
-
-def side_by_side(left_lines, right_lines, width):
-    matcher = difflib.SequenceMatcher(None, left_lines, right_lines)
-    rows = []
-    diff_count = 0
-    for tag, i1, i2, j1, j2 in matcher.get_opcodes():
-        left_chunk = left_lines[i1:i2]
-        right_chunk = right_lines[j1:j2]
-        if tag == "equal":
-            for l, r in zip(left_chunk, right_chunk):
-                rows.append((l, " ", r))
-        else:
-            marker = {"replace": "|", "delete": "<", "insert": ">"}[tag]
-            for l, r in zip_longest(left_chunk, right_chunk):
-                rows.append((l if l is not None else "", marker, r if r is not None else ""))
-                diff_count += 1
-    return rows, diff_count
-
-
-def zip_longest(a, b):
-    la, lb = len(a), len(b)
-    n = max(la, lb)
-    for k in range(n):
-        yield (a[k] if k < la else None, b[k] if k < lb else None)
-
-
 def main():
-    parser = argparse.ArgumentParser(description="Compare two text files side by side.")
+    parser = argparse.ArgumentParser(
+        description="Compare two .txt files by line content, ignoring order."
+    )
     parser.add_argument("file1")
     parser.add_argument("file2")
-    parser.add_argument("--width", type=int, default=0,
-                         help="Width of each column (default: auto-fit to terminal)")
     args = parser.parse_args()
 
     try:
@@ -65,24 +36,30 @@ def main():
         print(f"Error reading file: {e}", file=sys.stderr)
         return 1
 
-    if args.width:
-        col_width = args.width
-    else:
-        term_width = shutil.get_terminal_size(fallback=(120, 24)).columns
-        col_width = max(20, (term_width - 3) // 2)
+    left_count = Counter(left_lines)
+    right_count = Counter(right_lines)
 
-    rows, diff_count = side_by_side(left_lines, right_lines, col_width)
+    only_left = left_count - right_count
+    only_right = right_count - left_count
+    common = left_count & right_count
 
-    print(f"{fit(args.file1, col_width)} | {fit(args.file2, col_width)}")
-    print("-" * col_width + "-+-" + "-" * col_width)
-    for left, marker, right in rows:
-        print(f"{fit(left, col_width)} {marker} {fit(right, col_width)}")
+    def report(title, counter):
+        print(f"{title} ({sum(counter.values())} line(s)):")
+        for line, n in counter.items():
+            for _ in range(n):
+                print(f"  {line}")
+
+    report(f"Only in {args.file1}", only_left)
+    print()
+    report(f"Only in {args.file2}", only_right)
+    print()
+    print(f"Common to both: {sum(common.values())} line(s)")
 
     print()
-    if diff_count == 0:
-        print("Files are identical.")
+    if not only_left and not only_right:
+        print("Files contain identical lines (order ignored).")
     else:
-        print(f"{diff_count} differing line group(s) found.")
+        print(f"{sum(only_left.values()) + sum(only_right.values())} differing line(s) found.")
     return 0
 
 
